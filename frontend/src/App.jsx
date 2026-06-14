@@ -61,7 +61,7 @@ function App() {
   }, [selectedNode, selectedProduct, gameState.stores]);
 
   useEffect(() => {
-    ws.current = new WebSocket('ws://localhost:8000/ws');
+    ws.current = new WebSocket('wss://zepto-mesh-backend.onrender.com/ws');
     ws.current.onopen = () => setIsConnected(true);
     ws.current.onclose = () => setIsConnected(false);
     ws.current.onmessage = (event) => {
