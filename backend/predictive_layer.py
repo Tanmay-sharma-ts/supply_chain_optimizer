@@ -1,74 +1,60 @@
 import numpy as np
-from scipy.stats import poisson, bernoulli
+from scipy.stats import poisson
 
 class DemandPredictor:
-    def __init__(self, critical_threshold: float = 0.85):
+    def __init__(self, critical_threshold: float = 0.80):
         """
-        Initialize the Demand Predictor.
-        :param critical_threshold: The probability threshold (0 to 1) to flag a stockout risk.
+        Initialize the Advanced Demand Predictor.
+        :param critical_threshold: The probability threshold (e.g., 0.80) to flag an active SINK.
         """
         self.critical_threshold = critical_threshold
 
-    def calculate_stockout_probability(self, lambda_rate: float, current_stock: int) -> float:
+    def calculate_stockout_probability(self, hourly_lambda: float, current_stock: int, lookahead_minutes: float = 15.0) -> float:
         """
-        Calculate the probability that demand exceeds current stock in a given time window.
-        Uses the Poisson distribution.
+        Calculates the probability that demand exceeds current stock over an arbitrary lookahead window.
+        Uses the Poisson Cumulative Distribution Function (CDF).
+        """
+        if current_stock <= 0:
+            return 1.0
         
-        :param lambda_rate: Expected average demand in the time window.
-        :param current_stock: Current inventory level.
-        :return: Probability (0 to 1) of a stockout.
-        """
-        # Probability of getting EXACTLY k orders is poisson.pmf(k, lambda_rate)
-        # Probability of getting <= current_stock orders is poisson.cdf(current_stock, lambda_rate)
-        # Probability of stockout (demand > current_stock) is 1 - CDF
-        prob_no_stockout = poisson.cdf(current_stock, lambda_rate)
+        # Scale the hourly arrival rate (lambda) to match our lookahead window
+        # E.g., if hourly lambda is 24, a 15-minute window means lambda_scaled = 24 * (15/60) = 6.0
+        time_fraction = lookahead_minutes / 60.0
+        lambda_scaled = hourly_lambda * time_fraction
+
+        # Probability of getting <= current_stock orders is poisson.cdf
+        # Probability of a stockout (demand > current_stock) is 1 - CDF
+        prob_no_stockout = poisson.cdf(current_stock, lambda_scaled)
         prob_stockout = 1.0 - prob_no_stockout
-        return prob_stockout
-
-    def is_immediate_risk(self, risk_probability: float) -> bool:
-        """
-        Evaluate an immediate binary risk using a Bernoulli trial.
         
-        :param risk_probability: The underlying probability of the risk occurring.
-        :return: True if the trial results in the risk event happening, False otherwise.
-        """
-        # Bernoulli trial gives 1 with probability 'risk_probability', 0 otherwise
-        trial_result = bernoulli.rvs(risk_probability)
-        return bool(trial_result == 1)
+        return float(prob_stockout)
 
-    def evaluate_node(self, node_id: str, lambda_rate: float, current_stock: int) -> dict:
+    def evaluate_node(self, store_id: str, hourly_lambda: float, current_stock: int) -> dict:
         """
-        Evaluates a node to determine its status and returns the mathematical probabilities.
+        Evaluates a dark store node's risk profile across two distinct horizons:
+        1. Immediate Crisis Window (15 mins) -> Determines SINK status
+        2. Anticipatory Window (30 mins) -> Prepares GHOST paths before a crisis hits
         """
-        prob_stockout = self.calculate_stockout_probability(lambda_rate, current_stock)
+        # Horizon 1: Immediate risk (Next 15 minutes)
+        prob_stockout_15m = self.calculate_stockout_probability(hourly_lambda, current_stock, lookahead_minutes=15.0)
+        
+        # Horizon 2: Anticipatory risk (Next 30 minutes)
+        prob_stockout_30m = self.calculate_stockout_probability(hourly_lambda, current_stock, lookahead_minutes=30.0)
         
         status = "HEALTHY"
-        if prob_stockout >= self.critical_threshold:
+        
+        # If 15-minute risk is past our critical threshold, it is a desperate SINK
+        if prob_stockout_15m >= self.critical_threshold:
             status = "SINK"
-        elif current_stock > lambda_rate * 3 and prob_stockout < 0.1:
+        # If the 15-minute window is safe, but the 30-minute window looks bad, trigger a GHOST state
+        elif prob_stockout_30m >= 0.50:
+            status = "ANTICIPATORY_RISK"
+        # Source condition: Ample supply to sustain demand triple the lookahead average
+        elif current_stock > (hourly_lambda * 0.5) and prob_stockout_30m < 0.10:
             status = "SOURCE"
             
         return {
             "status": status,
-            "stockout_prob": prob_stockout
+            "stockout_prob": prob_stockout_15m, # Primary tracking probability
+            "anticipatory_prob": prob_stockout_30m
         }
-
-# Example usage
-if __name__ == "__main__":
-    predictor = DemandPredictor(critical_threshold=0.85)
-    
-    # Store A: High demand during match, low stock
-    store_a_lambda = 25.0  # 25 orders expected
-    store_a_stock = 20     # only 20 units left
-    
-    prob_a = predictor.calculate_stockout_probability(store_a_lambda, store_a_stock)
-    status_a = predictor.evaluate_node("Store_A", store_a_lambda, store_a_stock)
-    print(f"Store A - Stockout Prob: {prob_a:.2f}, Status: {status_a}")
-    
-    # Store B: Idle store, high stock
-    store_b_lambda = 5.0
-    store_b_stock = 40
-    
-    prob_b = predictor.calculate_stockout_probability(store_b_lambda, store_b_stock)
-    status_b = predictor.evaluate_node("Store_B", store_b_lambda, store_b_stock)
-    print(f"Store B - Stockout Prob: {prob_b:.2f}, Status: {status_b}")
