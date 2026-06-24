@@ -6,7 +6,10 @@
   <img src="https://img.shields.io/badge/Leaflet-Maps-199900?style=for-the-badge&logo=leaflet&logoColor=white" alt="Leaflet" />
 </p>
 
+
+
 # 🔮 FarAway — Dark Store Mesh Optimizer
+Website - https://dark-mesh-optimizer.vercel.app/
 
 > **Real-time supply chain intelligence for hyperlocal delivery networks.**  
 > An interactive simulation platform that predicts stockouts using Poisson statistics, rebalances inventory across a mesh of dark stores via Vehicle Routing Problem (VRP) optimization, and visualizes the entire network as a living, breathing Voronoi tessellation on a map of Bangalore.
